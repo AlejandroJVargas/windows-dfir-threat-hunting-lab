@@ -28,7 +28,7 @@ Parsing the extracted Windows Prefetch artifacts with **PECmd** confirmed the ex
 | `BURPSUITECOMMUNITY.EXE` | 1 | 2021-04-30 00:40:45 | **Discovery**: Web application testing and proxy interception |
 | `SDELETE.EXE` / `SDELETE64.EXE` | 4 / 1 | 2021-04-30 01:08:06 | **Defense Evasion (Anti-Forensics)**: Secure file shredding to prevent recovery |
 
-![Evidence of Execution](evidence/01_evidence_of_execution_pecmd.png)
+![Evidence of Execution]
 
 ---
 
