@@ -1,0 +1,22 @@
+title: Anti-Forensic Tool Execution - SDelete
+id: e4b28d61-8f43-4dc9-9831-d249f7b11c90
+status: production
+description: Detects the execution of Sysinternals SDelete used to overwrite and securely wipe forensic artifacts on Windows hosts.
+author: Incident Response Team
+references:
+    - https://attack.mitre.org/techniques/T1070/004/
+tags:
+    - attack.defense_evasion
+    - attack.t1070.004
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection:
+        Image|endswith:
+            - '\sdelete.exe'
+            - '\sdelete64.exe'
+    condition: selection
+falsepositives:
+    - Legitimate administrative data sanitation workflows.
+level: high
