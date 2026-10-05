@@ -28,14 +28,14 @@ Parsing the extracted Windows Prefetch artifacts with **PECmd** confirmed the ex
 | `BURPSUITECOMMUNITY.EXE` | 1 | 2021-04-30 00:40:45 | **Discovery**: Web application testing and proxy interception |
 | `SDELETE.EXE` / `SDELETE64.EXE` | 4 / 1 | 2021-04-30 01:08:06 | **Defense Evasion (Anti-Forensics)**: Secure file shredding to prevent recovery |
 
-![Evidence of Execution]
+
 
 ---
 
 ### 2. Host Persistence & Registry Triage (Registry Explorer)
 Analysis of the `SOFTWARE` registry hive (`Microsoft\Windows\CurrentVersion\Run`) demonstrated that active auto-start mechanisms were absent. However, an invalidated entry (`LastServiceStart`) marked with an **Is Deleted** flag was identified with a last modification timestamp of `2021-04-30 00:58:47 UTC`. This timeline correlates directly with the execution window of anti-forensic wiping tools on the host.
 
-![Registry Analysis]
+
 
 ---
 
@@ -48,7 +48,7 @@ Inspection of `recentservers.xml` extracted from the target host uncovered an ac
 
 This confirms lateral or external data staging directed toward an adversary-controlled Linux workstation on the local network segment.
 
-![FileZilla Evidence]
+
 
 ---
 
@@ -58,7 +58,7 @@ Utilizing **Autopsy**, system activity was synthesized across browser history, d
 2. **Reconnaissance & Evasion (2021-04-29):** Sweeps across the IP subnet, followed by Tor Browser installation.
 3. **Encryption & Data Destruction (2021-04-30):** Deployment of `QuickCrypto`, subsequent FTP staging toward `192.168.1.20`, and execution of `SDelete` at `01:08:06 UTC` immediately prior to system shutdown and acquisition.
 
-![Autopsy Timeline]
+
 
 ---
 
