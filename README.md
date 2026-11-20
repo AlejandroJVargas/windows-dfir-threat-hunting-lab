@@ -1,88 +1,109 @@
-# Windows Endpoint Forensics & Threat Hunting Lab (Case: AfricanFalls)
+# Windows Endpoint Forensics: AfricanFalls Case
 
-## Executive Summary
-A host-based Digital Forensics and Incident Response (DFIR) and Threat Hunting investigation was conducted on a logical forensic image (`.ad1`) acquired from a compromised Windows workstation. The investigation confirmed a multi-stage intrusion involving local network reconnaissance, credential sniffing, encrypted staging, external file transfer setup, and intentional anti-forensic wiping before acquisition.
+I investigated a forensic image (`.ad1`) of a Windows workstation from the **AfricanFalls** DFIR challenge. The question was simple: what did the user of this machine do, and did they try to hide it? The answer: they installed hacking tools, scanned and sniffed the network, set up an FTP connection to a Kali machine, and then wiped files with SDelete.
 
----
-
-## Threat Hunting Hypotheses
-* **Hypothesis 1 (Execution of Non-Standard Binaries):** Adversaries often execute dual-use security tools and portable payloads from user-writable directories (`%Temp%`, `Downloads`, or `AppData`).
-* **Hypothesis 2 (Anti-Forensic Activity):** Prior to containment or extraction, attackers leverage file wiping utilities to hinder forensic recovery and timelining.
-* **Hypothesis 3 (Alternative Protocol Exfiltration):** Suspected exfiltration attempts utilizing plain-text or alternative network protocols (e.g., FTP) from installed third-party utilities.
+**Tools:** FTK Imager, Autopsy, PECmd (Prefetch), Registry Explorer.
 
 ---
 
-## Technical Findings & Artifact Analysis
+## What I was looking for
 
-### 1. Evidence of Execution (PECmd / Windows Prefetch)
-Parsing the extracted Windows Prefetch artifacts with **PECmd** confirmed the execution of unauthorized assessment and evasion tooling:
+1. **Tools that shouldn't be there**: scanners, sniffers or pentest tools run from user folders.
+2. **Anti-forensics**: secure deletion before the image was taken.
+3. **Exfiltration**: data sent out over FTP or another plain protocol.
 
-| Executable Name | Run Count | Last Run Timestamp (UTC) | Tactic / Threat Hunting Context |
+(Full hypotheses and steps: [`playbooks/threat_hunting_hypothesis.md`](playbooks/threat_hunting_hypothesis.md))
+
+---
+
+## 1. What ran on the machine (Prefetch)
+
+Windows keeps a Prefetch file for each program it runs, including how many times it ran and when. I parsed them with **PECmd**:
+
+| Program | Times run | Last run (UTC) | What it's for |
 | :--- | :---: | :--- | :--- |
-| `BETTERCAP.EXE` | 7 | 2021-04-28 17:24:05 | **Credential Access**: Man-in-the-Middle and packet sniffing framework |
-| `NMAP.EXE` | 3 | 2021-04-28 17:37:54 | **Discovery**: Active subnet discovery and port scanning |
-| `WIRESHARK.EXE` / `DUMPCAP.EXE` | 1 / 8 | 2021-04-28 17:39:31 | **Collection**: Network packet capture and inspection |
-| `IPSCAN.EXE` | 3 | 2021-04-29 16:28:12 | **Discovery**: Lightweight IP range sweeping |
-| `TORBROWSER-INSTALL...EXE` | 1 | 2021-04-29 18:22:32 | **Defense Evasion / C2**: Anonymous communication channel setup |
-| `QUICKCRYPTO.EXE` | 5 | 2021-04-30 00:28:40 | **Collection / Impact**: File encryption and steganographic data staging |
-| `BURPSUITECOMMUNITY.EXE` | 1 | 2021-04-30 00:40:45 | **Discovery**: Web application testing and proxy interception |
-| `SDELETE.EXE` / `SDELETE64.EXE` | 4 / 1 | 2021-04-30 01:08:06 | **Defense Evasion (Anti-Forensics)**: Secure file shredding to prevent recovery |
+| `BETTERCAP.EXE` | 7 | 2021-04-28 17:24:05 | Man-in-the-middle / sniffing |
+| `NMAP.EXE` | 3 | 2021-04-28 17:37:54 | Port scanning |
+| `WIRESHARK.EXE` / `DUMPCAP.EXE` | 1 / 8 | 2021-04-28 17:39:31 | Packet capture |
+| `IPSCAN.EXE` | 3 | 2021-04-29 16:28:12 | IP range scanning |
+| `TORBROWSER-INSTALL...EXE` | 1 | 2021-04-29 18:22:32 | Anonymous browsing (Tor) |
+| `QUICKCRYPTO.EXE` | 5 | 2021-04-30 00:28:40 | File encryption |
+| `BURPSUITECOMMUNITY.EXE` | 1 | 2021-04-30 00:40:45 | Web proxy / testing |
+| `SDELETE.EXE` / `SDELETE64.EXE` | 4 / 1 | 2021-04-30 01:08:06 | Secure file deletion |
 
+Any one of these could have a legitimate reason on an IT admin's machine. All of them together, ending with SDelete, is not normal.
 
-
----
-
-### 2. Host Persistence & Registry Triage (Registry Explorer)
-Analysis of the `SOFTWARE` registry hive (`Microsoft\Windows\CurrentVersion\Run`) demonstrated that active auto-start mechanisms were absent. However, an invalidated entry (`LastServiceStart`) marked with an **Is Deleted** flag was identified with a last modification timestamp of `2021-04-30 00:58:47 UTC`. This timeline correlates directly with the execution window of anti-forensic wiping tools on the host.
-
-
+![Prefetch results](evidence/2021-04%20part1.png)
 
 ---
 
-### 3. Exfiltration Infrastructure (FileZilla Configuration Triage)
-Inspection of `recentservers.xml` extracted from the target host uncovered an active outbound connection profile:
-* **Target Host:** `192.168.1.20`
-* **Port:** `21` (FTP)
-* **Authenticated Account:** `kali`
-* **Logon Type:** Standard interactive authentication (`2`)
+## 2. Registry (persistence check)
 
-This confirms lateral or external data staging directed toward an adversary-controlled Linux workstation on the local network segment.
-
-
+In the `SOFTWARE` hive (`Microsoft\Windows\CurrentVersion\Run`) there was **no active auto-start entry**, so I found no persistence. There was one **deleted** value, `LastServiceStart`, last modified **2021-04-30 00:58:47 UTC**, about 10 minutes before SDelete last ran. I can't say what it was, but the timing fits with the cleanup.
 
 ---
 
-### 4. Forensic Timelining & Reconstruction (Autopsy)
-Utilizing **Autopsy**, system activity was synthesized across browser history, downloaded payloads, and execution logs:
-1. **Initial Tool Staging (2021-04-28):** Ingestion and installation of WinPcap/Npcap drivers followed by port scanners (`Nmap`) and MitM tooling (`Bettercap`).
-2. **Reconnaissance & Evasion (2021-04-29):** Sweeps across the IP subnet, followed by Tor Browser installation.
-3. **Encryption & Data Destruction (2021-04-30):** Deployment of `QuickCrypto`, subsequent FTP staging toward `192.168.1.20`, and execution of `SDelete` at `01:08:06 UTC` immediately prior to system shutdown and acquisition.
+## 3. FTP connection to a Kali machine
 
+FileZilla's `recentservers.xml` had a saved connection:
 
+| Field | Value |
+| :--- | :--- |
+| Host | `192.168.1.20` |
+| Port | `21` (FTP, unencrypted) |
+| Username | `kali` |
 
----
+A saved FTP login to a host with the username `kali` (the default user on Kali Linux) points to a transfer to an attacker-controlled machine on the same network.
 
-## MITRE ATT&CK Mapping
-
-| Tactic | Technique ID | Technique Name | Mapped Evidence |
-| :--- | :--- | :--- | :--- |
-| **Discovery** | T1046 | Network Service Discovery | `NMAP.EXE`, `IPSCAN.EXE` |
-| **Credential Access** | T1040 | Network Sniffing | `BETTERCAP.EXE`, `WIRESHARK.EXE` |
-| **Defense Evasion** | T1070.004 | File Deletion: Indicator Removal | `SDELETE.EXE`, `SDELETE64.EXE` |
-| **Command & Control** | T1090.003 | Multi-hop Proxy: Tor | `TORBROWSER-INSTALL...EXE` |
-| **Exfiltration** | T1048.003 | Exfiltration Over Unencrypted Non-C2 Protocol | `recentservers.xml` (`192.168.1.20:21`) |
+![FileZilla config](evidence/03_filezilla_exfiltration_config.png)
 
 ---
 
-## Indicators of Compromise (IoCs)
-* **Adversary IP / Staging Server:** `192.168.1.20`
-* **Outbound Service:** FTP (`TCP/21`)
-* **Suspicious Binaries:** `bettercap.exe`, `sdelete.exe`, `sdelete64.exe`, `quickcrypto.exe`, `ipscan.exe`
-* **Compromised Account Handle:** `kali`
+## 4. Timeline (Autopsy)
+
+| Date | Activity |
+| :--- | :--- |
+| 2021-04-28 | Installs capture drivers (WinPcap/Npcap), runs Nmap and Bettercap |
+| 2021-04-29 | Scans the IP range, installs Tor Browser |
+| 2021-04-30 | Encrypts files with QuickCrypto, prepares the FTP transfer to `192.168.1.20`, runs SDelete at **01:08:06 UTC**, then the system is shut down and imaged |
+
+![Autopsy ingest](evidence/autopsy_evidence_ingest.png)
+![Timeline](evidence/timeline1.png)
 
 ---
 
-## Containment & Remediation Recommendations
-1. **Network Containment:** Isolate the endpoint from the broadcast domain and enforce perimeter firewall drops for all traffic to/from `192.168.1.20`.
-2. **Credential Revocation:** Immediately invalidate all credentials stored or cached on the endpoint, including domain service credentials and FTP access keys.
-3. **Host Reimaging:** Due to verified evidence wiping (`sdelete.exe`), the operating system state cannot be certified secure through conventional antivirus cleaning. Rebuild the system from a verified golden image.
+## MITRE ATT&CK
+
+| Technique | ID | Evidence |
+| :--- | :--- | :--- |
+| Network Service Discovery | `T1046` | Nmap, IPScan |
+| Network Sniffing | `T1040` | Bettercap, Wireshark |
+| Indicator Removal: File Deletion | `T1070.004` | SDelete |
+| Proxy: Multi-hop Proxy (Tor) | `T1090.003` | Tor Browser install |
+| Exfiltration Over Unencrypted Non-C2 Protocol | `T1048.003` | FTP to `192.168.1.20:21` |
+
+---
+
+## IOCs
+
+- Staging host: `192.168.1.20` (FTP, TCP/21, username `kali`)
+- Tools: `bettercap.exe`, `nmap.exe`, `ipscan.exe`, `quickcrypto.exe`, `sdelete.exe`, `sdelete64.exe`
+
+## Response
+
+1. Isolate the workstation and block traffic to/from `192.168.1.20`.
+2. Reset any credentials used on the machine (including the FTP account).
+3. Re-image the machine: because SDelete was used, I can't be sure what was removed, so cleaning it isn't enough.
+
+---
+
+## Other files in this repo
+
+| File | What it is |
+| :--- | :--- |
+| [`playbooks/incident_response_runbook.md`](playbooks/incident_response_runbook.md) | Response steps for this type of incident |
+| [`queries_and_scripts/detection_rules.sigma.yml`](queries_and_scripts/detection_rules.sigma.yml) | Sigma rule to detect SDelete execution |
+| [`queries_and_scripts/hunt_temp_execution.ps1`](queries_and_scripts/hunt_temp_execution.ps1) | Filters PECmd output for the suspicious tools above |
+| [`queries_and_scripts/artifact_extraction.bat`](queries_and_scripts/artifact_extraction.bat) | Collects Prefetch, registry hives, event logs and network state from a live host |
+
+**Author:** Alejandro José Vargas
